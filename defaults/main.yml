@@ -1,0 +1,4 @@
+postgres_exporter_version: "0.15.0"
+postgres_exporter_user: "postgres_exporter"
+postgres_exporter_group: "postgres_exporter"
+data_source_password: "password"
