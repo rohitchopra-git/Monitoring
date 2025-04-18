@@ -1,72 +1,57 @@
-- name: Create system user and group
+- name: Ensure wget is installed (Debian-based only)
+  ansible.builtin.apt:
+    name: wget
+    state: present
+  when: ansible_os_family == "Debian"
+  become: true
+
+- name: Create postgres_exporter system user
   ansible.builtin.user:
     name: "{{ postgres_exporter_user }}"
-    shell: /sbin/nologin
-    system: yes
     group: "{{ postgres_exporter_group }}"
-    createhome: no
-
-- name: Create group
-  ansible.builtin.group:
-    name: "{{ postgres_exporter_group }}"
+    shell: "{{ postgres_exporter_shell }}"
     system: yes
+    create_home: yes
 
 - name: Download postgres_exporter
   ansible.builtin.get_url:
-    url: "{{ download_url }}"
+    url: "{{ postgres_exporter_download_url }}"
     dest: "/tmp/postgres_exporter.tar.gz"
+    mode: '0644'
 
-- name: Extract exporter
+- name: Extract postgres_exporter
   ansible.builtin.unarchive:
     src: "/tmp/postgres_exporter.tar.gz"
-    dest: "/tmp"
+    dest: "/tmp/"
     remote_src: yes
 
-- name: Copy binary
+- name: Move binary to /usr/local/bin
   ansible.builtin.copy:
     src: "/tmp/postgres_exporter-{{ postgres_exporter_version }}.linux-amd64/postgres_exporter"
-    dest: "{{ bin_path }}"
-    mode: '0755'
-    owner: "{{ postgres_exporter_user }}"
-    group: "{{ postgres_exporter_group }}"
+    dest: "{{ postgres_exporter_bin_path }}"
     remote_src: yes
+    mode: '0755'
+  become: true
 
-- name: Create work directory
-  ansible.builtin.file:
-    path: "{{ work_dir }}"
-    state: directory
-    owner: "{{ postgres_exporter_user }}"
-    group: "{{ postgres_exporter_group }}"
-
-- name: Create environment file
-  ansible.builtin.template:
-    src: postgres_exporter.env.j2
-    dest: "{{ work_dir }}/postgres_exporter.env"
-    owner: "{{ postgres_exporter_user }}"
-    group: "{{ postgres_exporter_group }}"
-    mode: '0644'
-
-- name: Create SQL file
-  ansible.builtin.template:
-    src: postgres-exporter.sql.j2
-    dest: "{{ work_dir }}/postgres-exporter.sql"
-    mode: '0644'
-
-- name: Copy systemd service
+- name: Create .pgpass file for postgres_exporter user
   ansible.builtin.copy:
-    src: postgres-exporter.service
+    dest: "/home/{{ postgres_exporter_user }}/.pgpass"
+    content: "{{ postgres_exporter_host }}:{{ postgres_exporter_port }}:{{ postgres_exporter_db }}:postgres_exporter:{{ postgres_exporter_password }}"
+    owner: "{{ postgres_exporter_user }}"
+    group: "{{ postgres_exporter_group }}"
+    mode: '0600'
+
+- name: Create systemd service file
+  ansible.builtin.template:
+    src: postgres_exporter.service.j2
     dest: /etc/systemd/system/postgres_exporter.service
     mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart postgres_exporter
 
-- name: Reload systemd
-  ansible.builtin.include_role:
-    name: "{{ role_name }}"
-  tasks_from: handlers/main.yml
-  vars:
-    role_name: "{{ role_name | default('postgres_exporter') }}"
-
-- name: Enable and start postgres_exporter
+- name: Enable and start postgres_exporter service
   ansible.builtin.systemd:
     name: postgres_exporter
+    enabled: true
     state: started
-    enabled: yes
