@@ -1,0 +1,72 @@
+- name: Create system user and group
+  ansible.builtin.user:
+    name: "{{ postgres_exporter_user }}"
+    shell: /sbin/nologin
+    system: yes
+    group: "{{ postgres_exporter_group }}"
+    createhome: no
+
+- name: Create group
+  ansible.builtin.group:
+    name: "{{ postgres_exporter_group }}"
+    system: yes
+
+- name: Download postgres_exporter
+  ansible.builtin.get_url:
+    url: "{{ download_url }}"
+    dest: "/tmp/postgres_exporter.tar.gz"
+
+- name: Extract exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/postgres_exporter.tar.gz"
+    dest: "/tmp"
+    remote_src: yes
+
+- name: Copy binary
+  ansible.builtin.copy:
+    src: "/tmp/postgres_exporter-{{ postgres_exporter_version }}.linux-amd64/postgres_exporter"
+    dest: "{{ bin_path }}"
+    mode: '0755'
+    owner: "{{ postgres_exporter_user }}"
+    group: "{{ postgres_exporter_group }}"
+    remote_src: yes
+
+- name: Create work directory
+  ansible.builtin.file:
+    path: "{{ work_dir }}"
+    state: directory
+    owner: "{{ postgres_exporter_user }}"
+    group: "{{ postgres_exporter_group }}"
+
+- name: Create environment file
+  ansible.builtin.template:
+    src: postgres_exporter.env.j2
+    dest: "{{ work_dir }}/postgres_exporter.env"
+    owner: "{{ postgres_exporter_user }}"
+    group: "{{ postgres_exporter_group }}"
+    mode: '0644'
+
+- name: Create SQL file
+  ansible.builtin.template:
+    src: postgres-exporter.sql.j2
+    dest: "{{ work_dir }}/postgres-exporter.sql"
+    mode: '0644'
+
+- name: Copy systemd service
+  ansible.builtin.copy:
+    src: postgres-exporter.service
+    dest: /etc/systemd/system/postgres_exporter.service
+    mode: '0644'
+
+- name: Reload systemd
+  ansible.builtin.include_role:
+    name: "{{ role_name }}"
+  tasks_from: handlers/main.yml
+  vars:
+    role_name: "{{ role_name | default('postgres_exporter') }}"
+
+- name: Enable and start postgres_exporter
+  ansible.builtin.systemd:
+    name: postgres_exporter
+    state: started
+    enabled: yes
